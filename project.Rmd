@@ -1,0 +1,421 @@
+---
+title: "Team3project"
+author: "Ziv Fenigstein, Yarden Tzaraf, Ruby Chocron, Gaby Levis"
+date: "2023-05-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r load-packages, include = FALSE}
+library(knitr)
+library(tidyverse)
+library(broom)
+library(htmltools)
+library(janitor)
+library(countrycode)
+library(dplyr)
+library(tinytex)
+library(latexpdf)
+
+```
+
+```{r}
+
+#Import the data
+gii_data = read_csv("C:/Users/Tzur/Desktop/project data/Gender_Inequality_Index.csv", show_col_types = FALSE)
+economical_crimes = read_csv("C:/Users/Tzur/Desktop/project data/data_cts_corruption_and_economic_crime.csv", show_col_types = FALSE)
+gii_by_year = read_csv("C:/Users/Tzur/Desktop/proposal/gender-inequality-index-from-the-human-development-report.csv")
+violent_sexual_crimes = read_csv("C:/Users/Tzur/Desktop/project data/data_cts_violent_and_sexual_crime.csv", show_col_types = FALSE)
+population_per_country = read_csv("C:/Users/Tzur/Desktop/project data/population by country.csv", show_col_types = FALSE)
+
+ # decapitalize the columns name
+gii_data = gii_data %>%
+  janitor::clean_names()
+economical_crimes = economical_crimes %>%
+  janitor::clean_names()
+violent_sexual_crimes = violent_sexual_crimes %>%
+  janitor::clean_names()
+gii_by_year = gii_by_year %>%
+  janitor::clean_names()
+
+#group by countries and categories
+ economical_crimes2 = economical_crimes %>% 
+  group_by(iso3_code,country, category, indicator, year) %>%
+  summarize(avg_value = mean(value, na.rm = TRUE), .groups = "drop")
+
+
+violent_sexual_crimes2 = violent_sexual_crimes %>% 
+  group_by(iso3_code,country, category, indicator, year) %>%
+  summarize(avg_value = mean(value, na.rm = TRUE), .groups = "drop")
+#add country code to the every country
+all_crimes2 = rbind(economical_crimes2,violent_sexual_crimes2)
+all_crimes2 = arrange(all_crimes2, country)
+all_crimes2 = all_crimes2 %>% rename(country_code = iso3_code)
+
+all_crimes2 = merge(all_crimes2, population_per_country, by = "country_code", all.x = TRUE)
+```
+
+
+
+
+```{r, warning=FALSE}
+# remove Vatican and Kosovo
+all_crimes2 <- all_crimes2 %>%
+  filter(!(country_code %in% c("VAT", "KOS")))
+na_rows <- all_crimes2[!complete.cases(all_crimes2), ]
+na_rows
+#finding info per 100,000 
+all_crimes2 <- all_crimes2 %>% 
+  mutate(value_per_100000 = avg_value*100000 / as.numeric(population)) %>% 
+  select(-avg_value, -population)
+#add country code to the gii table
+gii_data$code <- countrycode(gii_data$country, "country.name", "iso3c")
+gii_data <- gii_data %>% rename(country_code = code)%>%
+  select(-country)
+gii_by_year <- gii_by_year %>% rename(country_code = code)%>%
+  select(-entity)
+#merge all the data
+# Assuming you have a data frame called 'data' with a column named 'CountryCode'
+# Define a vector of European country codes
+european_country_codes <- c("ALB", "AND", "ARM", "AUT", "AZE", "BLR", "BEL", "BIH", "BGR", "HRV", "CYP", "CZE", "DNK", "EST", "FIN", "FRA", "GEO", "DEU", "GRC", "HUN", "ISL", "IRL", "ITA", "KAZ", "XKX", "LVA", "LIE", "LTU", "LUX", "MLT", "MDA", "MCO", "MNE", "NLD", "MKD", "NOR", "POL", "PRT", "ROU", "RUS", "SMR", "SRB", "SVK", "SVN", "ESP", "SWE", "CHE", "TUR", "UKR", "GBR", "VAT")
+#merge all the data
+crimes_gii2 <- merge(all_crimes2, gii_by_year, by = c("country_code", "year"), all.x = TRUE)
+# Define a vector of European country codes
+#crimes_gii2 <- crimes_gii2[complete.cases(crimes_gii2$gii), ]
+# Subset the data frame to keep only the rows with European country codes
+crimes_gii2 <- subset(crimes_gii2, country_code %in% european_country_codes)
+gii_by_year <- subset(gii_by_year, country_code %in% european_country_codes)
+
+```
+
+
+
+
+
+```{r}
+#Import trusts statistics about eropean country
+trust_statistics = read_csv("C:/Users/Tzur/Desktop/proposal/countries_trust.csv", show_col_types = FALSE)
+trust_statistics = trust_statistics[, 1:4]
+na_rows <- is.na(trust_statistics$geo)
+
+# Select rows without NA values in the 'geo' column
+trust_statistics <- trust_statistics[!na_rows, ]
+colnames(trust_statistics)[colnames(trust_statistics) == "geo"] = "country_code"
+
+
+```
+
+```{r}
+#merge trust statistic with crimes_gii2 (including years)
+crimes_gii = merge(crimes_gii, trust_statistics, by = "country_code", all.x = TRUE)
+crimes_gii = crimes_gii[complete.cases(crimes_gii), ]
+
+```
+
+
+
+
+
+```{r}
+#merge trust statistic with crimes_gii2 (including years)
+crimes_gii2 = merge(crimes_gii2, trust_statistics, by = "country_code", all.x = TRUE)
+crimes_gii2 = crimes_gii2[complete.cases(crimes_gii2), ]
+
+```
+
+
+
+```{r}
+# Create a list of crimes and their corresponding categories
+crime_categories <- list(
+  sexual = c("Sexual violence: Sexual assault","Total", "Sexual Exploitation","Sexual violence: Rape","Sexual violence","Child pornography","Sexual violence: Other acts of sexual violence"),
+  economical = c("Theft", "Money laundering", "Theft: of a motorized vehicle","Fraud"),
+  violent = c("Serious assault", "Perpetrator unknown to the victim", "Robbery", "Acts intended to induce fear or emotional distress","Burglary","Kidnapping","Other Perpetrator known to the victim","Intimate partner or family member","Relationship to perpetrator is not known" ),
+  corruption = c("Corruption: Bribery", "Corruption: Other acts of corruption", "Smuggling of migrants","Corruption" ),
+  enviromental = c("Acts involving the movement of dumping of waste", "Acts that cause environmental pollution or degradation", "Acts that result in the depletion of degradation of natural resources","Trade or possession of protected or prohibited species of faune and flora"),
+  cyber = c("Unlawful interference with a computer system or computer data", "Unlawful access to a computer system", "Unlawful interception or access of computer data","Fraud: Cyber-related (Cy)","Acts intended to induce fear or emotional distress: Cyber-related","Child pornography: Cyber-related")
+)
+```
+
+
+```{r}
+# Group the rows based on crime category for each country
+grouped_crimes <- crimes_gii %>%
+  mutate(crime_category = case_when(
+    category %in% crime_categories$sexual ~ "sexual",
+    category %in% crime_categories$corruption ~ "corruption",
+    category %in% crime_categories$violent ~ "violent",
+    category %in% crime_categories$economical ~ "economical",
+    category %in% crime_categories$enviromental ~ "enviromental",
+    category %in% crime_categories$cyber ~ "cyber"
+  )) %>%
+ group_by(country_code,country,crime_category,gii,police_trust, legal_system_trust, political_system_trust) %>%
+  summarise(sum_cases_per_100k = sum(value_per_100000)) %>%
+   ungroup() %>%
+  spread(crime_category, sum_cases_per_100k, fill = 0) 
+
+grouped_crimes <- grouped_crimes %>%
+  mutate(country = ifelse(country_code == "TUR", "Turkiye", country))
+grouped_crimes <- grouped_crimes[complete.cases(grouped_crimes$police_trust), ]
+
+
+grouped_crimes2["gender_inequality_index"] <- (grouped_crimes2["gender_inequality_index"] - min(grouped_crimes2["gender_inequality_index"])) / (max(grouped_crimes2["gender_inequality_index"]) - min(grouped_crimes2["gender_inequality_index"]))
+```
+
+
+
+```{r, warning=FALSE}
+# Group the rows based on crime category for each country
+grouped_crimes2 <- crimes_gii2 %>%
+  mutate(crime_category = case_when(
+    category %in% crime_categories$sexual ~ "sexual",
+    category %in% crime_categories$corruption ~ "corruption",
+    category %in% crime_categories$violent ~ "violent",
+    category %in% crime_categories$economical ~ "economical",
+    category %in% crime_categories$enviromental ~ "enviromental",
+    category %in% crime_categories$cyber ~ "cyber"
+  )) %>%
+ group_by(country_code,country, year,crime_category,gender_inequality_index,police_trust, legal_system_trust, political_system_trust) %>%
+  summarise(sum_cases_per_100k = sum(value_per_100000)) %>%
+   ungroup() %>%
+  spread(crime_category, sum_cases_per_100k, fill = 0) 
+
+grouped_crimes2 <- grouped_crimes2 %>%
+  mutate(country = ifelse(country_code == "TUR", "Turkiye", country))
+grouped_crimes2 <- grouped_crimes2[complete.cases(grouped_crimes2$police_trust), ]
+
+
+grouped_crimes2["gender_inequality_index"] <- (grouped_crimes2["gender_inequality_index"] - min(grouped_crimes2["gender_inequality_index"])) / (max(grouped_crimes2["gender_inequality_index"]) - min(grouped_crimes2["gender_inequality_index"]))
+```
+
+
+
+```{r}
+# Define the division of countries into Eastern and Western Europe
+eastern_europe <- c("Albania", "Armenia", "Azerbaijan", "Belarus", "Bosnia and Herzegovina", "Bulgaria",
+                    "Croatia", "Cyprus", "Czechia", "Estonia", "Georgia", "Hungary", "Kazakhstan", "Latvia",
+                    "Lithuania", "Republic of Moldova", "Montenegro", "North Macedonia", "Poland", "Romania",
+                    "Russian Federation", "Serbia", "Slovakia", "Slovenia", "Ukraine","Turkiye")
+                    
+western_europe <- c("Austria", "Belgium", "Denmark", "Finland", "France", "Germany", "Greece", "Iceland",
+                    "Ireland", "Italy", "Luxembourg", "Malta", "Netherlands", "Norway", "Portugal", "Spain",
+                    "Sweden", "Switzerland")
+
+# Add the Region column based on the division
+grouped_crimes2$Region <- ifelse(grouped_crimes2$country %in% eastern_europe, "Eastern Europe",
+                    ifelse(grouped_crimes2$country %in% western_europe, "Western Europe", NA))
+```
+
+
+```{r,warning=FALSE} 
+#groupe the crimes by region and year
+region_crimes = grouped_crimes2 %>%
+  group_by(Region,year) %>%
+  summarise_at(vars(-group_cols()), mean, na.rm = TRUE)
+region_crimes = region_crimes %>% select(-country_code, -country)
+region_crimes <- region_crimes[complete.cases(region_crimes), ]
+
+
+```
+
+
+
+```{r}
+#create trust_in_institutions column for every country calculated by the average of all the trust statistic
+grouped_crimes <- grouped_crimes %>%
+  mutate(trust_in_institutions = (police_trust + legal_system_trust + political_system_trust) / 3)
+```
+
+```{r}
+#create trust_in_institutions column for every country calculated by the average of all the trust statistic in grouped_crimes2 (include year)
+grouped_crimes2 <- grouped_crimes2 %>%
+  mutate(trust_in_institutions = (police_trust + legal_system_trust + political_system_trust) / 3)
+```
+
+
+# Linear model
+# figure 8
+
+```{r}
+# we built linear model to see the connections between different crimes to the trust statistic.
+# we used grouped_crimes df (without year) because there is no difference in the trust statistic #between the years
+crime_sections = c("violent","sexual","economical")
+# Iterate over each crime section
+for (section in crime_sections) {
+  # Fit a linear regression model
+  model <- lm(paste(section, "~ police_trust + legal_system_trust + political_system_trust"), data = grouped_crimes)
+
+  # Extract the coefficient estimates
+  intercept <- coef(model)[1]
+  police_trust <- coef(model)[2]
+  legal_trust <- coef(model)[3]
+  political_trust <- coef(model)[4]
+
+  # Print the regression equation
+  cat("Regression Equation (", section, "):\n")
+  cat(section, " = ", round(intercept, 3), " + ", round(police_trust, 3), " * police_trust + ", round(legal_trust, 3), " * legal_system_trust + ", round(political_trust, 3), " * political_system_trust\n")
+  cat("\n")
+}
+```
+
+## Including Plots
+
+```{r}
+ff <- crimes_gii2[crimes_gii2$category %in% c("Theft"), ]
+# Create scatter plot
+ggplot(ff, aes(x = gender_inequality_index, y = value_per_100000)) +
+  geom_point(alpha = 0.7, size = 3, na.rm = TRUE, color = "red") +
+  labs(x = "GII", y = "Theft cases per 100,000") +
+   labs(title = "GII vs. Theft (avg cases per 100,000 citizens)")+
+    scale_x_continuous(limits = c(0, 0.5))+
+  geom_smooth(method = "lm", se = FALSE)
+
+```
+
+
+# figure 1 
+```{r,warning=FALSE}
+ggplot(crimes_gii, aes(x = gii)) +
+  geom_point(aes(y = police_trust, color = "Police Trust"), size = 3) +
+  geom_point(aes(y = legal_system_trust, color = "Legal System Trust"), size = 3) +
+  geom_point(aes(y =political_system_trust, color = "Political System Trust"), size = 3) +
+  labs(x = "Gender Inequality Index (gii)",
+       y = "Trust Level Scores",
+       title = "Trust Levels vs. Gender Inequality") +
+  scale_color_manual(values = c("blue", "red", "green")) +
+  theme_minimal()
+```
+
+
+
+
+## DID model
+
+
+# figure 5
+```{r}
+
+# Create a scatter plot with GII vs. years and point size representing violent crimes
+ggplot(region_crimes, aes(x = year, y = gender_inequality_index,color = Region, size = violent)) +
+  geom_point() +
+  xlab("Year") +
+  ylab("Gender Inequality Index")+
+   ggtitle("Gender Inequality Index and violent crime by year and region") 
+```
+# figure 6
+```{r}
+# Create a scatter plot with GII vs. years and point size representing sexual crimes
+ggplot(region_crimes, aes(x = year, y = gender_inequality_index,color = Region, size = sexual)) +
+  geom_point() +
+  xlab("Year") +
+  ylab("Gender Inequality Index")+
+  ggtitle("Gender Inequality Index and sexual crime by year and region") 
+```
+# figure 7
+```{r}
+# Create a scatter plot with GII vs. years and point size representing economical crimes
+ggplot(region_crimes, aes(x = year, y = gender_inequality_index,color = Region, size = economical)) +
+  geom_point() +
+  xlab("Year") +
+  ylab("Gender Inequality Index")+
+  ggtitle("Gender Inequality Index and economical crime by year and region") 
+```
+
+
+
+# figure 2
+
+```{r}
+library(ggplot2)
+
+# Filter the data for years 2003-2009
+subset_data <- subset(grouped_crimes2, year >= 2003 & year <= 2008)
+
+# Create bins for GII values
+subset_data$gii_bins <- cut(subset_data$gender_inequality_index, breaks = c(0, 0.25, 0.5, 1),
+                            labels = c("0-0.25", "0.25-0.5", "0.5-1"))
+
+# Create facet graphs with color bins
+ggplot(subset_data, aes(x = trust_in_institutions, y = violent, color = gii_bins, label = country_code)) +
+  geom_point(size = 3) +
+    geom_text(aes(label = country_code), hjust = 0, vjust = 0) +  # Add country labels
+
+  labs(x = "trust", y = "violent", color = "GII Bins") +
+  scale_color_manual(values = c("0-0.25" = "green", "0.25-0.5" = "blue", "0.5-1" = "red"),
+                     guide = guide_legend(title = "GII Bins")) +
+  ggtitle("Violent crimes according to GII and trust in institutions rate") +
+  theme_minimal() +
+  facet_wrap(~ year, nrow = 2)  # Adjust nrow for the desired number of rows
+
+```
+# figure 3
+```{r}
+library(ggplot2)
+
+
+# Filter the data for years 2003-2009
+subset_data <- subset(grouped_crimes2, year >= 2009 & year <= 2016)
+
+# Create bins for GII values
+subset_data$gii_bins <- cut(subset_data$gender_inequality_index, breaks = c(0, 0.25, 0.5, 1),
+                            labels = c("0-0.25", "0.25-0.5", "0.5-1"))
+
+# Create facet graphs with color bins
+ggplot(subset_data, aes(x = trust_in_institutions, y = violent, color = gii_bins, label = country_code)) +
+  geom_point(size = 3) +
+    geom_text(aes(label = country_code), hjust = 0, vjust = 0) +  # Add country labels
+
+  labs(x = "trust", y = "violent", color = "GII Bins") +
+  scale_color_manual(values = c("0-0.25" = "green", "0.25-0.5" = "blue", "0.5-1" = "red"),
+                     guide = guide_legend(title = "GII Bins")) +
+  ggtitle("Violent crimes according to GII and trust in institutions rate") +
+  theme_minimal() +
+  facet_wrap(~ year, nrow = 2)  # Adjust nrow for the desired number of rows
+
+```
+
+# figure 4
+```{r}
+library(ggplot2)
+# Filter the data for years 2003-2009
+subset_data <- subset(grouped_crimes2, year >= 2017 & year <= 2020)
+
+# Create bins for GII values
+subset_data$gii_bins <- cut(subset_data$gender_inequality_index, breaks = c(0, 0.25, 0.5, 1),
+                            labels = c("0-0.25", "0.25-0.5", "0.5-1"))
+
+# Create facet graphs with color bins
+ggplot(subset_data, aes(x = trust_in_institutions, y = violent, color = gii_bins, label = country_code)) +
+  geom_point(size = 3) +
+    geom_text(aes(label = country_code), hjust = 0, vjust = 0) +  # Add country labels
+
+  labs(x = "trust", y = "violent", color = "GII Bins") +
+  scale_color_manual(values = c("0-0.25" = "green", "0.25-0.5" = "blue", "0.5-1" = "red"),
+                     guide = guide_legend(title = "GII Bins")) +
+  ggtitle("Violent crimes according to GII and trust in institutions rate") +
+  theme_minimal() +
+  facet_wrap(~ year, nrow = 2)  # Adjust nrow for the desired number of rows
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
